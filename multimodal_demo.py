@@ -127,7 +127,7 @@ def vector_search(search_text='', search_image=None, index=None, namespace=None)
             emb = (text_weight * text_emb) + (image_weight * img_emb)
         else:
             print('Please provide atleast one type of query!')
-        cursor = lookinto_database(emb, num_k=10, index=index, type_of_doc=type_of_doc, namespace=namespace)
+        cursor = lookinto_database(emb, num_k=top_k, index=index, type_of_doc=type_of_doc, namespace=namespace)
         return cursor, multimodal
 
 def generate_response_gradio(search_text='', search_image=None, index=None, namespace=None):
