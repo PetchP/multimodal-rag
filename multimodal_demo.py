@@ -102,7 +102,7 @@ def llm_decision(query_text='', query_image=None):
                             ```
                             Your task is to determine the following:
                             1. File Type to Retrieve: Decide whether to look for text files, image files, or both in the database. Return 'text_and_image' if the user's prompt requires information from both sources to retrieve the most relevant documents. Otherwise, specify the necessary modality: <text/image/text_and_image>.
-                            2. Number of Documents to Retrieve: Based on the content of the 'Text' in the prompt, determine the number of documents to retrieve. Default to 10 if the number is not specified in the prompt. The range is from 1 to infinity.
+                            2. Number of Documents to Retrieve: Based on the content of the 'Text' in the prompt, determine the number of documents to retrieve. Default to 10 if the number is not specified in the prompt or is less than 10. 
                             3. Multimodality Requirement: Determine if the LLM needs to understand and analyze the image content (either the attached or retrieved image) to fulfill the user's request. Use <True/False> where True indicates a need for deep understanding, and False indicates no such requirement.
 
                             Answer in the form of a list (e.g., ['text', 9, 'True'])."""
@@ -142,26 +142,31 @@ def generate_response_gradio(search_text='', search_image=None, index=None, name
             retrieved_images.append(doc['image'])
             doc['image'] = '<attached_image>'
 
+    # ให้ LLM รู้ว่า user's input มีทั้ง text และ image        
     if search_image:
         search_text += " + <attached_image>"
 
-    if multimodal == 'False':
-        template = """Generate a response based only on the following context. DO NOT include any information which is outside or unrelated to this context.:
-            {context}
-
-            User Prompt: {question}
-
+    #template components
+    template_command = """Generate a response based only on the following context. DO NOT include any information which is outside or unrelated to this context.:"""
+    template_rule = """
             You need to follow these rules to ensure accurate responses:
             - If you need to provide the placeholders of the images, you must use ONLY this form (and keep the same case as the original unique_name): [<attached_image>: <unique_name>]
             - DO NOT attach the images' placeholders with the following form: ![<unique_name>](<attached_image>)
-            - If the user does not ask you to provide the image, DO NOT provide the image.
+            - If the user does not ask you to provide the image, DO NOT provide any image.
             - If the 'User Prompt' is empty and there are attached images in the context, just respond with the appropriate response followed by the placeholders of the images.
             - If the 'User Prompt' is not empty and there are attached images in the context, respond appropriately to the User Prompt as if you have seen the images, using definite nouns (e.g., [Noun] นี้) instead of mentioning the name of the images.
             - If there are some 'this' or 'that' image in the prompt, it means that the user mentions to the attached image. You must not assume that the attached image is in the context and avoid to mention any name specifically.
             - You must respond appropriately and accurately to the User Prompt based on the given context. If the user command you to provide the details, you must provide the details.
             - If the context provides more images than the user wants, you need to choose ALL of the texts or images most relevant to the prompt and discard those irrelevant (e.g., if there is only 1 movie mentioned in the detail section, the image returned should be the one whose unique name matches that movie.).
-            - If there is not enough information to answer, state that there is no answer based on the available information. Do not guess or provide uncertain information. If there are something that is seemed to be incorrect, and do not fabricate answers if something seems incorrect. DO NOT provide response that conflicts with the information in the context.
+            - If there is not enough information to answer, state that there is no answer based on the available information. Do not guess or provide uncertain information. If there are something that is seemed to be incorrect, and do not fabricate answers if something seems incorrect. DO NOT provide response that conflicts with the context.
             """
+
+    if multimodal == 'False':
+        template = template_command +"""{context}
+
+            User Prompt: {question}
+
+            """ + template_rule
         
         prompt = ChatPromptTemplate.from_template(template)
         llm = ChatOpenAI(temperature=0, model_name="gpt-4o-mini")
@@ -173,35 +178,21 @@ def generate_response_gradio(search_text='', search_image=None, index=None, name
         if search_image:
             if search_image.mode in ('RGBA'):
                 search_image = search_image.convert('RGB')
-            max_size = (520, 520)
+            max_size = (150, 150)
             search_image.thumbnail(max_size)
             buffered = io.BytesIO()
             search_image.save(buffered, format='PNG')
             search_image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-    
-    
-        template_command = f"""Generate a response based only on the following context. DO NOT include any information which is outside or unrelated to this context.:"""
-        
-        template_rule = """
-            You need to follow these rules to ensure accurate responses:
-            - If you need to provide the placeholders of the images, you must use ONLY this form (and keep the same case as the original unique_name): [<attached_image>: <unique_name>]
-            - DO NOT attach the images' placeholders with the following form: ![<unique_name>](<attached_image>)
-            - If the user does not ask you to provide the image, DO NOT provide any image.
-            - If the 'User Prompt' is empty and there are attached images in the context, just respond with the appropriate response followed by the placeholders of the images.
-            - If the 'User Prompt' is not empty and there are attached images in the context, respond appropriately to the User Prompt as if you have seen the images, using definite nouns (e.g., [Noun] นี้) instead of mentioning the name of the images.
-            - If there are some 'this' or 'that' image in the prompt, it means that the user mentions to the attached image. You must not assume that the attached image is in the context and avoid to mention any name specifically.
-            - You must respond appropriately and accurately to the User Prompt based on the given context. If the user command you to provide the details, you must provide the details. 
-            - If the context provides more images than the user wants, you need to choose ALL of the texts or images most relevant to the prompt and discard those irrelevant (e.g., if there is only 1 movie mentioned in the detail section, the image returned should be the one whose unique name matches that movie.).
-            - If there is not enough information to answer, state that there is no answer based on the available information. Do not guess or provide uncertain information. If there are something that is seemed to be incorrect, and do not fabricate answers if something seems incorrect. DO NOT provide response that conflicts with the information in the context.
-            """
 
-        content = [{"type": "text", "text": template_command},
-                {"type": "text", "text": f"Context:{str(new_cursor)}"},
-                {"type": "text", "text": f"Image(s) in the context (their order correspond to the order in the placeholders in \"Context\"):"},] 
+        content = [{"type": "text", "text": template_command[:-1] + '\n'},
+                  {"type": "text", "text": f"Context:{str(new_cursor)}"},
+                  {"type": "text", "text": f"Image(s) in the context (their order correspond to the order in the placeholders in \"Context\"):"},
+                   ]
         if retrieved_images != []:
-            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{retrieved_images}"}}) 
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{retrieved_images}"}})
         content.extend([{"type": "text", "text": f"User Prompt: {search_text}"},
-                        {"type": "text", "text": f"User Prompt (an attached image):"},])
+                        {"type": "text", "text": f"User Prompt (an attached image):"},
+                        ])
         if search_image:
             content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{search_image_base64}"}})
         content.append({"type": "text", "text": template_rule},)
@@ -250,7 +241,7 @@ def generate_response_gradio(search_text='', search_image=None, index=None, name
         response_texts.append(response)
     response_texts_str = ''    
     for idx, textt in enumerate(response_texts):
-        textt = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', textt)
+        textt = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', textt) #แปลง **...** เป็น <b>...</b>
         response_texts_str += textt.replace('\n','<br>')
     end_time = time.time()
     response_texts.append(f"\nTime spent: {end_time-start_time} s")
